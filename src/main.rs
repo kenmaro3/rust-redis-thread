@@ -1,5 +1,6 @@
 extern crate redis;
 use redis::Commands;
+use redis::RedisResult;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -146,11 +147,108 @@ fn attempt3() -> redis::RedisResult<()> {
     Ok(())
 }
 
+fn attempt4() {
+    let mut con = get_connection().unwrap();
+
+    // pub sub of redis
+    // in subthread, publish a message to key_message
+    let handler = std::thread::spawn(move || {
+        // get redis connection as con_thread
+        let mut con_thread = get_connection().unwrap();
+
+        let mut pubsub = con_thread.as_pubsub();
+        pubsub.subscribe("data").unwrap();
+        let msg = pubsub.get_message().unwrap();
+        let payload: u8 = msg.get_payload().unwrap();
+        //println!("channel '{}': {}", msg.get_channel_name(), payload);
+        return payload;
+    });
+
+    let data = handler.join().unwrap();
+    println!("got data from handler thread: {}", data);
+}
+
+fn get_ts_in_sring() -> String {
+    // get timestamp
+    let start = Instant::now();
+    // convert time stamp to integer then string
+    let start_str = start.elapsed().as_secs().to_string();
+    start_str
+}
+
 fn main() {
     //do_something();
 
     // attempt1 is using mpsc (shared memory)
     // attmpet2 is using redis pubsub
     // what we want to achive is to let main thread write to some shared memory then the handler thread will read from it, then join the handler thread in to main thread
-    attempt2();
+
+    let mut con = get_connection().unwrap();
+
+    let ts1 = get_ts_in_sring();
+
+    let key1: u64 = 1;
+    // convert key1 to string
+
+    let x: RedisResult<()> = con.hset_multiple(
+        key1.to_string(),
+        &[
+            ("result", "test_result"),
+            ("value1", "test_value1"),
+            ("value2", "test_value2"),
+            ("method", "test_method"),
+            ("is_finished", "false"),
+            ("is_queued", "false"),
+            ("created_at", &ts1),
+        ],
+    );
+
+    // loop to get the value of is_finished
+    loop {
+        let result: String = con.hget(key1.to_string(), "is_finished").unwrap();
+        if result == "true" {
+            break;
+        }
+        // sleep 1 second
+        thread::sleep(Duration::from_secs(1));
+        println!("sleeping...");
+    }
+
+    // once is_finished is true, we can get the result
+    let result: String = con.hget(key1.to_string(), "result").unwrap();
+
+    // print the result
+    println!("result: {}", result);
+
+    let ts2 = get_ts_in_sring();
+
+    let key2: u64 = 2;
+
+    let x: RedisResult<()> = con.hset_multiple(
+        key2.to_string(),
+        &[
+            ("result", "test_result"),
+            ("value1", "test_value1"),
+            ("value2", "test_value2"),
+            ("method", "test_method"),
+            ("is_finished", "false"),
+            ("is_queued", "false"),
+            ("created_at", &ts2),
+        ],
+    );
+
+    // loop to get the value of is_finished
+    loop {
+        let result: String = con.hget(key2.to_string(), "is_finished").unwrap();
+        if result == "true" {
+            break;
+        }
+        // sleep 1 second
+        thread::sleep(Duration::from_secs(1));
+        println!("sleeping...");
+    }
+
+    // once is_finished is true, we can get the result
+    let result: String = con.hget(key2.to_string(), "result").unwrap();
+    println!("got result2!!!");
 }
